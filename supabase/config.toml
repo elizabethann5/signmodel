@@ -1,0 +1,4 @@
+project_id = "bxodqqtbkpinmolnfqsn"
+
+[functions.translate-websocket]
+verify_jwt = false
