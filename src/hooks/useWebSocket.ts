@@ -1,13 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { io, Socket } from 'socket.io-client';
 
-interface WebSocketMessage {
-  type: 'translation' | 'error' | 'connected' | 'latency';
-  data?: any;
-  translation?: string;
-  confidence?: number;
-  gesture_id?: number;
-  latency?: number;
+interface TranslationResponse {
+  text: string;
+  audio?: string;
+  timestamp?: number;
+}
+
+interface StatusResponse {
+  message: string;
+}
+
+interface ErrorResponse {
+  message: string;
 }
 
 interface UseWebSocketReturn {
@@ -21,77 +27,81 @@ export const useWebSocket = (url: string): UseWebSocketReturn => {
   const [isConnected, setIsConnected] = useState(false);
   const [latency, setLatency] = useState(0);
   const [lastTranslation, setLastTranslation] = useState('');
-  const wsRef = useRef<WebSocket | null>(null);
+  const socketRef = useRef<Socket | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    // Connect to WebSocket
+    // Connect to Socket.IO server
     const connect = () => {
       try {
-        const ws = new WebSocket(url);
-        wsRef.current = ws;
+        const socket = io(url, {
+          transports: ['websocket', 'polling']
+        });
+        socketRef.current = socket;
 
-        ws.onopen = () => {
-          console.log('WebSocket connected');
+        socket.on('connect', () => {
+          console.log('Socket.IO connected');
           setIsConnected(true);
           toast({
             title: "Connected",
-            description: "WebSocket connection established",
+            description: "Connected to sign language translation server",
           });
-        };
+        });
 
-        ws.onmessage = (event) => {
-          try {
-            const message: WebSocketMessage = JSON.parse(event.data);
-            console.log('Received message:', message);
-
-            switch (message.type) {
-              case 'translation':
-                if (message.translation) {
-                  setLastTranslation(message.translation);
-                }
-                if (message.latency) {
-                  setLatency(message.latency);
-                }
-                break;
-              case 'latency':
-                if (message.latency) {
-                  setLatency(message.latency);
-                }
-                break;
-              case 'error':
-                console.error('WebSocket error:', message.data);
-                toast({
-                  title: "Translation Error",
-                  description: message.data || "An error occurred",
-                  variant: "destructive",
-                });
-                break;
-            }
-          } catch (error) {
-            console.error('Error parsing message:', error);
-          }
-        };
-
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
+        socket.on('status', (data: StatusResponse) => {
+          console.log('Status received:', data);
           toast({
-            title: "Connection Error",
-            description: "Failed to maintain WebSocket connection",
+            title: "Server Status",
+            description: data.message,
+          });
+        });
+
+        socket.on('translation_output', (data: TranslationResponse) => {
+          console.log('Translation received:', data);
+          if (data.text) {
+            setLastTranslation(data.text);
+          }
+          // Calculate latency if timestamp is provided
+          if (data.timestamp) {
+            const currentTime = Date.now();
+            const calculatedLatency = currentTime - data.timestamp;
+            setLatency(calculatedLatency);
+          }
+        });
+
+        socket.on('error', (data: ErrorResponse) => {
+          console.error('Server error:', data);
+          toast({
+            title: "Translation Error",
+            description: data.message || "An error occurred",
             variant: "destructive",
           });
-        };
+        });
 
-        ws.onclose = () => {
-          console.log('WebSocket disconnected');
+        socket.on('disconnect', () => {
+          console.log('Socket.IO disconnected');
           setIsConnected(false);
           setLatency(0);
-        };
+          toast({
+            title: "Disconnected",
+            description: "Lost connection to translation server",
+            variant: "destructive",
+          });
+        });
+
+        socket.on('connect_error', (error) => {
+          console.error('Socket.IO connection error:', error);
+          toast({
+            title: "Connection Failed",
+            description: "Could not connect to translation server",
+            variant: "destructive",
+          });
+        });
       } catch (error) {
-        console.error('Failed to create WebSocket:', error);
+        console.error('Failed to create Socket.IO connection:', error);
         toast({
           title: "Connection Failed",
-          description: "Could not establish WebSocket connection",
+          description: "Could not establish connection to server",
           variant: "destructive",
         });
       }
@@ -100,20 +110,19 @@ export const useWebSocket = (url: string): UseWebSocketReturn => {
     connect();
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
+      if (socketRef.current) {
+        socketRef.current.disconnect();
       }
     };
   }, [url, toast]);
 
   const sendFrame = useCallback((frameData: string) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (socketRef.current && socketRef.current.connected) {
       const timestamp = Date.now();
-      wsRef.current.send(JSON.stringify({
-        type: 'frame',
+      socketRef.current.emit('video_frame_stream', {
         frame: frameData,
         timestamp,
-      }));
+      });
     }
   }, []);
 

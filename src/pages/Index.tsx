@@ -12,8 +12,8 @@ const Index = () => {
   const [translationText, setTranslationText] = useState('');
   const [fps] = useState(10); // Target FPS for frame capture
 
-  // WebSocket connection (update URL when backend is ready)
-  const wsUrl = `wss://${import.meta.env.VITE_SUPABASE_PROJECT_ID}.supabase.co/functions/v1/translate-websocket`;
+  // Socket.IO connection to Flask backend
+  const wsUrl = 'http://localhost:5000';
   const { isConnected, sendFrame, latency, lastTranslation } = useWebSocket(wsUrl);
   const { speak, stop, isPlaying } = useTextToSpeech();
 
